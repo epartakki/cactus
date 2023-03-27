@@ -11,7 +11,6 @@ import express from "express";
 import { DefaultApi as ObjectStoreIpfsApi } from "@hyperledger/cactus-plugin-object-store-ipfs";
 import { AssetProfile } from "../../../main/typescript/generated/openapi/typescript-axios";
 import {
-  Checks,
   IListenOptions,
   LoggerProvider,
   LogLevelDesc,
@@ -38,10 +37,6 @@ import {
   Constants,
 } from "@hyperledger/cactus-core-api";
 import {
-  IPluginOdapGatewayConstructorOptions,
-  PluginOdapGateway,
-} from "../../../main/typescript/gateway/plugin-odap-gateway";
-import {
   ChainCodeProgrammingLanguage,
   DefaultEventHandlerStrategy,
   FabricContractInvocationType,
@@ -56,13 +51,20 @@ import {
   Web3SigningCredentialType,
   PluginLedgerConnectorBesu,
   PluginFactoryLedgerConnector,
-  ReceiptType,
   Web3SigningCredential,
 } from "@hyperledger/cactus-plugin-ledger-connector-besu";
-import Web3 from "web3";
-import { knexClientConnection, knexServerConnection } from "../knex.config";
+
 import { makeSessionDataChecks } from "../make-checks";
-import { besuAssetExists, fabricAssetExists } from "../make-checks-ledgers";
+import {
+  FabricOdapGateway,
+  IFabricOdapGatewayConstructorOptions,
+} from "../../../main/typescript/gateway/fabric-odap-gateway";
+import {
+  BesuOdapGateway,
+  IBesuOdapGatewayConstructorOptions,
+} from "../../../main/typescript/gateway/besu-odap-gateway";
+import { ClientGatewayHelper } from "../../../main/typescript/gateway/client/client-helper";
+import { ServerGatewayHelper } from "../../../main/typescript/gateway/server/server-helper";
 /**
  * Use this to debug issues with the fabric node SDK
  * ```sh
@@ -72,7 +74,7 @@ import { besuAssetExists, fabricAssetExists } from "../make-checks-ledgers";
 let ipfsApiHost: string;
 
 let fabricSigningCredential: FabricSigningCredential;
-const logLevel: LogLevelDesc = "TRACE";
+const logLevel: LogLevelDesc = "INFO";
 
 let ipfsServer: Server;
 let sourceGatewayServer: Server;
@@ -95,8 +97,8 @@ let besuKeychainId: string;
 
 let fabricConnector: PluginLedgerConnectorFabric;
 let besuConnector: PluginLedgerConnectorBesu;
-let pluginSourceGateway: PluginOdapGateway;
-let pluginRecipientGateway: PluginOdapGateway;
+let pluginSourceGateway: FabricOdapGateway;
+let pluginRecipientGateway: BesuOdapGateway;
 
 let odapClientGatewayApiHost: string;
 let odapServerGatewayApiHost: string;
@@ -384,29 +386,21 @@ beforeAll(async () => {
       queryCommitted,
     } = lifecycle;
 
-    Checks.truthy(packageIds, `packageIds truthy OK`);
-    Checks.truthy(
-      Array.isArray(packageIds),
-      `Array.isArray(packageIds) truthy OK`,
-    );
-    Checks.truthy(approveForMyOrgList, `approveForMyOrgList truthy OK`);
-    Checks.truthy(
-      Array.isArray(approveForMyOrgList),
-      `Array.isArray(approveForMyOrgList) truthy OK`,
-    );
-    Checks.truthy(installList, `installList truthy OK`);
-    Checks.truthy(
-      Array.isArray(installList),
-      `Array.isArray(installList) truthy OK`,
-    );
-    Checks.truthy(queryInstalledList, `queryInstalledList truthy OK`);
-    Checks.truthy(
-      Array.isArray(queryInstalledList),
-      `Array.isArray(queryInstalledList) truthy OK`,
-    );
-    Checks.truthy(commit, `commit truthy OK`);
-    Checks.truthy(packaging, `packaging truthy OK`);
-    Checks.truthy(queryCommitted, `queryCommitted truthy OK`);
+    expect(packageIds).toBeTruthy();
+    expect(packageIds).toBeArray();
+
+    expect(approveForMyOrgList).toBeTruthy();
+    expect(approveForMyOrgList).toBeArray();
+
+    expect(installList).toBeTruthy();
+    expect(installList).toBeArray();
+
+    expect(queryInstalledList).toBeTruthy();
+    expect(queryInstalledList).toBeArray();
+
+    expect(commit).toBeTruthy();
+    expect(packaging).toBeTruthy();
+    expect(queryCommitted).toBeTruthy();
 
     // FIXME - without this wait it randomly fails with an error claiming that
     // the endorsement was impossible to be obtained. The fabric-samples script
@@ -455,24 +449,20 @@ beforeAll(async () => {
       privateKey: besuTestLedger.getGenesisAccountPrivKey(),
     };
 
-    const web3 = new Web3(rpcApiHttpHost);
-    const testEthAccount = web3.eth.accounts.create(uuidv4());
-
-    const keychainEntryKey = uuidv4();
-    const keychainEntryValue = testEthAccount.privateKey;
     const keychainPlugin = new PluginKeychainMemory({
       instanceId: uuidv4(),
       keychainId: uuidv4(),
       // pre-provision keychain with mock backend holding the private key of the
       // test account that we'll reference while sending requests with the
       // signing credential pointing to this keychain entry.
-      backend: new Map([[keychainEntryKey, keychainEntryValue]]),
+      backend: new Map([
+        [
+          LockAssetContractJson.contractName,
+          JSON.stringify(LockAssetContractJson),
+        ],
+      ]),
       logLevel,
     });
-    keychainPlugin.set(
-      LockAssetContractJson.contractName,
-      JSON.stringify(LockAssetContractJson),
-    );
 
     const factory = new PluginFactoryLedgerConnector({
       pluginImportType: PluginImportType.Local,
@@ -503,28 +493,6 @@ beforeAll(async () => {
     });
     await besuConnector.registerWebServices(expressApp, wsApi);
     besuPath = `http://${address}:${port}`;
-
-    await besuConnector.transact({
-      web3SigningCredential: {
-        ethAccount: firstHighNetWorthAccount,
-        secret: besuKeyPair.privateKey,
-        type: Web3SigningCredentialType.PrivateKeyHex,
-      },
-      consistencyStrategy: {
-        blockConfirmations: 0,
-        receiptType: ReceiptType.NodeTxPoolAck,
-      },
-      transactionConfig: {
-        from: firstHighNetWorthAccount,
-        to: testEthAccount.address,
-        value: 10e9,
-        gas: 1000000,
-      },
-    });
-
-    const balance = await web3.eth.getBalance(testEthAccount.address);
-    expect(balance).not.toBeUndefined();
-    expect(parseInt(balance, 10)).toBe(10e9);
 
     besuWeb3SigningCredential = {
       ethAccount: firstHighNetWorthAccount,
@@ -559,7 +527,7 @@ beforeAll(async () => {
 
   {
     // Gateways configuration
-    const odapClientGatewayPluginOptions: IPluginOdapGatewayConstructorOptions = {
+    const odapClientGatewayPluginOptions: IFabricOdapGatewayConstructorOptions = {
       name: "cactus-plugin#odapGateway",
       dltIDs: ["DLT2"],
       instanceId: uuidv4(),
@@ -568,39 +536,35 @@ beforeAll(async () => {
       fabricSigningCredential: fabricSigningCredential,
       fabricChannelName: fabricChannelName,
       fabricContractName: fabricContractName,
-      fabricAssetID: FABRIC_ASSET_ID,
-      knexConfig: knexClientConnection,
+      clientHelper: new ClientGatewayHelper(),
+      serverHelper: new ServerGatewayHelper(),
     };
 
-    const odapServerGatewayPluginOptions: IPluginOdapGatewayConstructorOptions = {
+    const odapServerGatewayPluginOptions: IBesuOdapGatewayConstructorOptions = {
       name: "cactus-plugin#odapGateway",
       dltIDs: ["DLT1"],
       instanceId: uuidv4(),
       ipfsPath: ipfsApiHost,
-      besuAssetID: BESU_ASSET_ID,
       besuPath: besuPath,
       besuWeb3SigningCredential: besuWeb3SigningCredential,
       besuContractName: besuContractName,
       besuKeychainId: besuKeychainId,
-      knexConfig: knexServerConnection,
+      clientHelper: new ClientGatewayHelper(),
+      serverHelper: new ServerGatewayHelper(),
     };
 
-    pluginSourceGateway = new PluginOdapGateway(odapClientGatewayPluginOptions);
-    pluginRecipientGateway = new PluginOdapGateway(
+    pluginSourceGateway = new FabricOdapGateway(odapClientGatewayPluginOptions);
+    pluginRecipientGateway = new BesuOdapGateway(
       odapServerGatewayPluginOptions,
     );
 
-    if (
-      pluginSourceGateway.database == undefined ||
-      pluginRecipientGateway.database == undefined
-    ) {
-      throw new Error("Database is not correctly initialized");
-    }
+    expect(pluginSourceGateway.database).not.toBeUndefined();
+    expect(pluginRecipientGateway.database).not.toBeUndefined();
 
-    await pluginSourceGateway.database.migrate.rollback();
-    await pluginSourceGateway.database.migrate.latest();
-    await pluginRecipientGateway.database.migrate.rollback();
-    await pluginRecipientGateway.database.migrate.latest();
+    await pluginSourceGateway.database?.migrate.rollback();
+    await pluginSourceGateway.database?.migrate.latest();
+    await pluginRecipientGateway.database?.migrate.rollback();
+    await pluginRecipientGateway.database?.migrate.latest();
   }
   {
     // Server Gateway configuration
@@ -679,6 +643,8 @@ test("runs ODAP between two gateways via openApi", async () => {
     serverIdentityPubkey: "",
     maxRetries: MAX_RETRIES,
     maxTimeout: MAX_TIMEOUT,
+    sourceLedgerAssetID: FABRIC_ASSET_ID,
+    recipientLedgerAssetID: BESU_ASSET_ID,
   };
 
   const res = await apiClient.clientRequestV1(odapClientRequest);
@@ -694,26 +660,13 @@ test("runs ODAP between two gateways via openApi", async () => {
     pluginRecipientGateway,
     sessionID,
   );
+  await expect(
+    pluginSourceGateway.fabricAssetExists(FABRIC_ASSET_ID),
+  ).resolves.toBe(false);
 
-  expect(
-    await fabricAssetExists(
-      pluginSourceGateway,
-      fabricContractName,
-      fabricChannelName,
-      FABRIC_ASSET_ID,
-      fabricSigningCredential,
-    ),
-  ).toBe(false);
-
-  expect(
-    await besuAssetExists(
-      pluginRecipientGateway,
-      besuContractName,
-      besuKeychainId,
-      BESU_ASSET_ID,
-      besuWeb3SigningCredential,
-    ),
-  ).toBe(true);
+  await expect(
+    pluginRecipientGateway.besuAssetExists(BESU_ASSET_ID),
+  ).resolves.toBe(true);
 });
 
 afterAll(async () => {

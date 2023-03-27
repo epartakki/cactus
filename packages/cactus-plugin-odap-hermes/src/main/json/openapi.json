@@ -195,6 +195,18 @@
                     "assetProfile": {
                         "$ref":"#/components/schemas/AssetProfile"
                     },
+                    "allowedSourceBackupGateways": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "allowedRecipientBackupGateways": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
                     "sourceBasePath": {
                         "type":"string"
                     },
@@ -309,13 +321,10 @@
                     "maxRetries":{
                         "type": "number"
                     },
-                    "besuAssetID": {
+                    "recipientLedgerAssetID": {
                         "type":"string"
                     },
-                    "fabricAssetID": {
-                        "type":"string"
-                    },
-                    "fabricAssetSize": {
+                    "sourceLedgerAssetID": {
                         "type":"string"
                     },
                     "maxTimeout": {
@@ -449,7 +458,7 @@
                     "sequenceNumber":{
                         "type":"integer"
                     },
-                    "sourceGatewayPath": {
+                    "sourceBasePath": {
                         "type": "string"
                     },
                     "recipientBasePath": {
@@ -460,6 +469,18 @@
                     },
                     "maxTimeout": {
                         "type": "number"
+                    },
+                    "backupGatewaysAllowed": {
+                        "type":"array",
+                        "items":{
+                            "type":"string"
+                        }
+                    },
+                    "recipientLedgerAssetID": {
+                        "type": "string"
+                    },
+                    "sourceLedgerAssetID": {
+                        "type": "string"
                     }
                 },
                 "required": [
@@ -478,7 +499,10 @@
                     "sourceBasePath",
                     "recipientBasePath",
                     "maxRetries",
-                    "maxTimeout"
+                    "maxTimeout",
+                    "backupGatewaysAllowed",
+                    "recipientLedgerAssetID",
+                    "sourceLedgerAssetID"
                 ]
             },
             "TransferInitializationV1Response":{
@@ -518,6 +542,12 @@
                     },
                     "signature":{
                         "type":"string"
+                    },
+                    "backupGatewaysAllowed": {
+                        "type":"array",
+                        "items":{
+                            "type":"string"
+                        }
                     }
                 },
                 "required": [
@@ -528,7 +558,8 @@
                     "sessionID",
                     "serverIdentityPubkey",
                     "sequenceNumber",
-                    "signature"
+                    "signature",
+                    "backupGatewaysAllowed"
                 ]
             },
             "TransferCommenceV1Request":{
@@ -887,7 +918,7 @@
                 "required": [
                     "sessionID",
                     "messageType",
-                    "ClientIdentityPubkey",
+                    "clientIdentityPubkey",
                     "serverIdentityPubkey",
                     "commitAcknowledgementClaim",
                     "hashCommitFinal",
@@ -1016,6 +1047,12 @@
                     },
                     "maxTimeout": {
                         "type": "number"
+                    },
+                    "sourceLedgerAssetID": {
+                        "type": "string"
+                    },
+                    "recipientLedgerAssetID": {
+                        "type": "string"
                     }
                 },
                 "required": [
@@ -1035,11 +1072,12 @@
                     "serverIdentityPubkey",
                     "clientDltSystem",
                     "serverDltSystem",
-                    "serverGatewayInstanceID",
                     "clientGatewayConfiguration",
                     "serverGatewayConfiguration",
                     "maxRetries",
-                    "maxTimeout"
+                    "maxTimeout",
+                    "sourceLedgerAssetID",
+                    "recipientLedgerAssetID"
                 ]
             },
             "RecoverV1Message":{
@@ -1057,6 +1095,15 @@
                     "lastLogEntryTimestamp": {
                         "type": "string"
                     },
+                    "isBackup": {
+                        "type": "boolean"
+                    },
+                    "newBasePath": {
+                        "type": "string"
+                    },
+                    "newGatewayPubKey": {
+                        "type": "string"
+                    },
                     "signature": {
                         "type": "string"
                     }
@@ -1065,7 +1112,9 @@
                     "sessionID",
                     "odapPhase",
                     "sequenceNumber",
-                    "lastLogEntryHash",
+                    "lastLogEntryTimestamp",
+                    "isBackup",
+                    "newBasePath",
                     "signature"
                 ]
             },

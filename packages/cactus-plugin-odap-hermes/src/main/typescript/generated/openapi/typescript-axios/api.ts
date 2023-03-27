@@ -226,6 +226,18 @@ export interface ClientV1Request {
      * @memberof ClientV1Request
      */
     maxTimeout: number;
+    /**
+     * 
+     * @type {string}
+     * @memberof ClientV1Request
+     */
+    sourceLedgerAssetID: string;
+    /**
+     * 
+     * @type {string}
+     * @memberof ClientV1Request
+     */
+    recipientLedgerAssetID: string;
 }
 /**
  * 
@@ -330,7 +342,7 @@ export interface CommitFinalV1Response {
      * @type {string}
      * @memberof CommitFinalV1Response
      */
-    clientIdentityPubkey?: string;
+    clientIdentityPubkey: string;
     /**
      * 
      * @type {string}
@@ -979,7 +991,25 @@ export interface RecoverV1Message {
      * @type {string}
      * @memberof RecoverV1Message
      */
-    lastLogEntryTimestamp?: string;
+    lastLogEntryTimestamp: string;
+    /**
+     * 
+     * @type {boolean}
+     * @memberof RecoverV1Message
+     */
+    isBackup: boolean;
+    /**
+     * 
+     * @type {string}
+     * @memberof RecoverV1Message
+     */
+    newBasePath: string;
+    /**
+     * 
+     * @type {string}
+     * @memberof RecoverV1Message
+     */
+    newGatewayPubKey?: string;
     /**
      * 
      * @type {string}
@@ -1109,6 +1139,18 @@ export interface SessionData {
      * @memberof SessionData
      */
     assetProfile?: AssetProfile;
+    /**
+     * 
+     * @type {Array<string>}
+     * @memberof SessionData
+     */
+    allowedSourceBackupGateways?: Array<string>;
+    /**
+     * 
+     * @type {Array<string>}
+     * @memberof SessionData
+     */
+    allowedRecipientBackupGateways?: Array<string>;
     /**
      * 
      * @type {string}
@@ -1342,19 +1384,13 @@ export interface SessionData {
      * @type {string}
      * @memberof SessionData
      */
-    besuAssetID?: string;
+    recipientLedgerAssetID?: string;
     /**
      * 
      * @type {string}
      * @memberof SessionData
      */
-    fabricAssetID?: string;
-    /**
-     * 
-     * @type {string}
-     * @memberof SessionData
-     */
-    fabricAssetSize?: string;
+    sourceLedgerAssetID?: string;
     /**
      * 
      * @type {number}
@@ -1796,7 +1832,7 @@ export interface TransferInitializationV1Request {
      * @type {string}
      * @memberof TransferInitializationV1Request
      */
-    sourceGatewayPath?: string;
+    sourceBasePath: string;
     /**
      * 
      * @type {string}
@@ -1815,6 +1851,24 @@ export interface TransferInitializationV1Request {
      * @memberof TransferInitializationV1Request
      */
     maxTimeout: number;
+    /**
+     * 
+     * @type {Array<string>}
+     * @memberof TransferInitializationV1Request
+     */
+    backupGatewaysAllowed: Array<string>;
+    /**
+     * 
+     * @type {string}
+     * @memberof TransferInitializationV1Request
+     */
+    recipientLedgerAssetID: string;
+    /**
+     * 
+     * @type {string}
+     * @memberof TransferInitializationV1Request
+     */
+    sourceLedgerAssetID: string;
 }
 
 /**
@@ -1897,6 +1951,12 @@ export interface TransferInitializationV1Response {
      * @memberof TransferInitializationV1Response
      */
     signature: string;
+    /**
+     * 
+     * @type {Array<string>}
+     * @memberof TransferInitializationV1Response
+     */
+    backupGatewaysAllowed: Array<string>;
 }
 
 /**

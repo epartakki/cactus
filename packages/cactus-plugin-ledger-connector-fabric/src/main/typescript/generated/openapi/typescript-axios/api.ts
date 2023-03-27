@@ -512,6 +512,25 @@ export interface DeploymentTargetOrganization {
 /**
  * 
  * @export
+ * @interface ErrorExceptionResponseV1
+ */
+export interface ErrorExceptionResponseV1 {
+    /**
+     * 
+     * @type {string}
+     * @memberof ErrorExceptionResponseV1
+     */
+    message: string;
+    /**
+     * 
+     * @type {string}
+     * @memberof ErrorExceptionResponseV1
+     */
+    error: string;
+}
+/**
+ * 
+ * @export
  * @enum {string}
  */
 
@@ -695,6 +714,120 @@ export interface GatewayOptionsWallet {
      */
     json?: string;
 }
+/**
+ * Request for GetBlock endpoint.
+ * @export
+ * @interface GetBlockRequestV1
+ */
+export interface GetBlockRequestV1 {
+    /**
+     * Fabric channel which we want to query.
+     * @type {string}
+     * @memberof GetBlockRequestV1
+     */
+    channelName: string;
+    /**
+     * Fabric channel we want to connect to. If not provided, then one from channelName parameter will be used
+     * @type {string}
+     * @memberof GetBlockRequestV1
+     */
+    connectionChannelName?: string;
+    /**
+     * 
+     * @type {GatewayOptions}
+     * @memberof GetBlockRequestV1
+     */
+    gatewayOptions: GatewayOptions;
+    /**
+     * 
+     * @type {GetBlockRequestV1Query}
+     * @memberof GetBlockRequestV1
+     */
+    query: GetBlockRequestV1Query;
+    /**
+     * If true, encoded buffer will be returned. Otherwise, entire block object is returned.
+     * @type {boolean}
+     * @memberof GetBlockRequestV1
+     */
+    skipDecode?: boolean;
+}
+/**
+ * Query selector, caller must provide at least one of them. First found will be used, rest will be ignored, so it\'s recommended to pass single selector.
+ * @export
+ * @interface GetBlockRequestV1Query
+ */
+export interface GetBlockRequestV1Query {
+    /**
+     * Select block by it\'s number.
+     * @type {string}
+     * @memberof GetBlockRequestV1Query
+     */
+    blockNumber?: string;
+    /**
+     * 
+     * @type {GetBlockRequestV1QueryBlockHash}
+     * @memberof GetBlockRequestV1Query
+     */
+    blockHash?: GetBlockRequestV1QueryBlockHash;
+    /**
+     * Select block by id of transaction that it contains.
+     * @type {string}
+     * @memberof GetBlockRequestV1Query
+     */
+    transactionId?: string;
+}
+/**
+ * Select block by it\'s hash.
+ * @export
+ * @interface GetBlockRequestV1QueryBlockHash
+ */
+export interface GetBlockRequestV1QueryBlockHash {
+    /**
+     * NodeJS Buffer encoding (utf-8, hex, binary, base64, etc...). Passed directly to `Buffer.from()` call on hashBuffer. If not provided then JSON buffer format is assumed.
+     * @type {string}
+     * @memberof GetBlockRequestV1QueryBlockHash
+     */
+    encoding?: string;
+    /**
+     * Buffer of blockHash. It\'s encoding should be described in `encoding` parameter.
+     * @type {any}
+     * @memberof GetBlockRequestV1QueryBlockHash
+     */
+    buffer: any;
+}
+/**
+ * When skipDecode is false (default) then decoded block object is returned.
+ * @export
+ * @interface GetBlockResponseDecodedV1
+ */
+export interface GetBlockResponseDecodedV1 {
+    /**
+     * Full hyperledger fabric block data.
+     * @type {any}
+     * @memberof GetBlockResponseDecodedV1
+     */
+    decodedBlock: any | null;
+}
+/**
+ * When skipDecode is true then encoded block Buffer is returned.
+ * @export
+ * @interface GetBlockResponseEncodedV1
+ */
+export interface GetBlockResponseEncodedV1 {
+    /**
+     * 
+     * @type {any}
+     * @memberof GetBlockResponseEncodedV1
+     */
+    encodedBlock: any;
+}
+/**
+ * @type GetBlockResponseV1
+ * Response from GetBlock endpoint.
+ * @export
+ */
+export type GetBlockResponseV1 = GetBlockResponseDecodedV1 | GetBlockResponseEncodedV1;
+
 /**
  * 
  * @export
@@ -987,6 +1120,173 @@ export interface VaultTransitKey {
     token: string;
 }
 /**
+ * Error response from WatchBlocks operation.
+ * @export
+ * @interface WatchBlocksCactusErrorResponseV1
+ */
+export interface WatchBlocksCactusErrorResponseV1 {
+    /**
+     * Error code.
+     * @type {number}
+     * @memberof WatchBlocksCactusErrorResponseV1
+     */
+    code: number;
+    /**
+     * Description of the error.
+     * @type {string}
+     * @memberof WatchBlocksCactusErrorResponseV1
+     */
+    errorMessage: string;
+}
+/**
+ * Transaction summary from commited block.
+ * @export
+ * @interface WatchBlocksCactusTransactionsEventV1
+ */
+export interface WatchBlocksCactusTransactionsEventV1 {
+    /**
+     * ChainCode containing function that was executed.
+     * @type {string}
+     * @memberof WatchBlocksCactusTransactionsEventV1
+     */
+    chaincodeId: string;
+    /**
+     * Transaction identifier.
+     * @type {string}
+     * @memberof WatchBlocksCactusTransactionsEventV1
+     */
+    transactionId: string;
+    /**
+     * Function name that was executed.
+     * @type {string}
+     * @memberof WatchBlocksCactusTransactionsEventV1
+     */
+    functionName: string;
+    /**
+     * List of function arguments.
+     * @type {Array<string>}
+     * @memberof WatchBlocksCactusTransactionsEventV1
+     */
+    functionArgs: Array<string>;
+}
+/**
+ * Custom response containing block transactions summary. Compatible with legacy fabric-socketio connector monitoring.
+ * @export
+ * @interface WatchBlocksCactusTransactionsResponseV1
+ */
+export interface WatchBlocksCactusTransactionsResponseV1 {
+    /**
+     * List of transactions summary
+     * @type {Array<WatchBlocksCactusTransactionsEventV1>}
+     * @memberof WatchBlocksCactusTransactionsResponseV1
+     */
+    cactusTransactionsEvents: Array<WatchBlocksCactusTransactionsEventV1>;
+}
+/**
+ * Response that corresponds to Fabric SDK \'filtered\' EventType.
+ * @export
+ * @interface WatchBlocksFilteredResponseV1
+ */
+export interface WatchBlocksFilteredResponseV1 {
+    /**
+     * Filtered commited block.
+     * @type {any}
+     * @memberof WatchBlocksFilteredResponseV1
+     */
+    filteredBlock: any;
+}
+/**
+ * Response that corresponds to Fabric SDK \'full\' EventType.
+ * @export
+ * @interface WatchBlocksFullResponseV1
+ */
+export interface WatchBlocksFullResponseV1 {
+    /**
+     * Full commited block.
+     * @type {any}
+     * @memberof WatchBlocksFullResponseV1
+     */
+    fullBlock: any;
+}
+/**
+ * Response type from WatchBlocks. \'Cactus*\' are custom views, others correspond to fabric SDK call.
+ * @export
+ * @enum {string}
+ */
+
+export enum WatchBlocksListenerTypeV1 {
+    Filtered = 'filtered',
+    Full = 'full',
+    Private = 'private',
+    CactusTransactions = 'cactus:transactions'
+}
+
+/**
+ * Options passed when subscribing to block monitoring.
+ * @export
+ * @interface WatchBlocksOptionsV1
+ */
+export interface WatchBlocksOptionsV1 {
+    /**
+     * Hyperledger Fabric channel to connect to.
+     * @type {string}
+     * @memberof WatchBlocksOptionsV1
+     */
+    channelName: string;
+    /**
+     * 
+     * @type {GatewayOptions}
+     * @memberof WatchBlocksOptionsV1
+     */
+    gatewayOptions: GatewayOptions;
+    /**
+     * 
+     * @type {WatchBlocksListenerTypeV1}
+     * @memberof WatchBlocksOptionsV1
+     */
+    type: WatchBlocksListenerTypeV1;
+    /**
+     * From which block start monitoring. Defaults to latest.
+     * @type {string}
+     * @memberof WatchBlocksOptionsV1
+     */
+    startBlock?: string;
+}
+/**
+ * Response that corresponds to Fabric SDK \'private\' EventType.
+ * @export
+ * @interface WatchBlocksPrivateResponseV1
+ */
+export interface WatchBlocksPrivateResponseV1 {
+    /**
+     * Private commited block.
+     * @type {any}
+     * @memberof WatchBlocksPrivateResponseV1
+     */
+    privateBlock: any;
+}
+/**
+ * @type WatchBlocksResponseV1
+ * Response block from WatchBlocks endpoint. Depends on \'type\' passed in subscription options.
+ * @export
+ */
+export type WatchBlocksResponseV1 = WatchBlocksCactusErrorResponseV1 | WatchBlocksCactusTransactionsResponseV1 | WatchBlocksFilteredResponseV1 | WatchBlocksFullResponseV1 | WatchBlocksPrivateResponseV1;
+
+/**
+ * Websocket requests for monitoring new blocks.
+ * @export
+ * @enum {string}
+ */
+
+export enum WatchBlocksV1 {
+    Subscribe = 'org.hyperledger.cactus.api.async.hlfabric.WatchBlocksV1.Subscribe',
+    Next = 'org.hyperledger.cactus.api.async.hlfabric.WatchBlocksV1.Next',
+    Unsubscribe = 'org.hyperledger.cactus.api.async.hlfabric.WatchBlocksV1.Unsubscribe',
+    Error = 'org.hyperledger.cactus.api.async.hlfabric.WatchBlocksV1.Error',
+    Complete = 'org.hyperledger.cactus.api.async.hlfabric.WatchBlocksV1.Complete'
+}
+
+/**
  * web-socket key details for signing fabric message with private key stored with external client
  * @export
  * @interface WebSocketKey
@@ -1074,6 +1374,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(deployContractV1Request, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get block from the channel using one of selectors from the input. Works only on Fabric 2.x.
+         * @param {GetBlockRequestV1} [getBlockRequestV1] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getBlockV1: async (getBlockRequestV1?: GetBlockRequestV1, options: any = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/v1/plugins/@hyperledger/cactus-plugin-ledger-connector-fabric/get-block`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+    
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter, options.query);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(getBlockRequestV1, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -1216,6 +1550,17 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Get block from the channel using one of selectors from the input. Works only on Fabric 2.x.
+         * @param {GetBlockRequestV1} [getBlockRequestV1] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getBlockV1(getBlockRequestV1?: GetBlockRequestV1, options?: any): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GetBlockResponseV1>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getBlockV1(getBlockRequestV1, options);
+            return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
+        },
+        /**
+         * 
          * @summary Get the Prometheus Metrics
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1278,6 +1623,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary Get block from the channel using one of selectors from the input. Works only on Fabric 2.x.
+         * @param {GetBlockRequestV1} [getBlockRequestV1] 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getBlockV1(getBlockRequestV1?: GetBlockRequestV1, options?: any): AxiosPromise<GetBlockResponseV1> {
+            return localVarFp.getBlockV1(getBlockRequestV1, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary Get the Prometheus Metrics
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1337,6 +1692,18 @@ export class DefaultApi extends BaseAPI {
      */
     public deployContractV1(deployContractV1Request?: DeployContractV1Request, options?: any) {
         return DefaultApiFp(this.configuration).deployContractV1(deployContractV1Request, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Get block from the channel using one of selectors from the input. Works only on Fabric 2.x.
+     * @param {GetBlockRequestV1} [getBlockRequestV1] 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof DefaultApi
+     */
+    public getBlockV1(getBlockRequestV1?: GetBlockRequestV1, options?: any) {
+        return DefaultApiFp(this.configuration).getBlockV1(getBlockRequestV1, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

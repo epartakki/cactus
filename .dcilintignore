@@ -8,7 +8,7 @@ tools/docker/besu-all-in-one/supervisord.conf
 docs/source/conf.py
 
 # Cannot be edited due to configuration schema of third party software
-examples/register-indy-data/req_discounted_cartrade.py
+examples/register-indy-data/register-indy-data.py
 
 # Cannot be edited due to configuration schema of third party software
 tools/docker/indy-testnet/Dockerfile
@@ -18,3 +18,11 @@ packages/cactus-test-tooling/src/main/typescript/keycloak/keycloak-container.ts
 
 # Generated code that cannot be modified
 examples/cactus-example-carbon-accounting-backend/src/main/json/generated/build-info/**
+
+# Cannot be edited as its a name of a imported Corda library, and Corda syntax
+weaver/core/drivers/corda-driver/src/main/kotlin/CustomSerializationWhitelist.kt
+weaver/samples/corda/corda-simple-application/clients/src/main/kotlin/com/cordaSimpleApplication/client/CustomSerializationWhitelist.kt
+weaver/core/network/corda-interop-app/interop-workflows/src/main/kotlin/com/weaver/corda/app/interop/flows/customSerializers/CustomSerializationWhitelist.kt
+
+# Corda test network files that are generated and therefore cannot be altered to comply with DCI-Lint
+weaver/tests/network-setups/corda/shared

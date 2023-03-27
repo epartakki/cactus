@@ -3,10 +3,18 @@ export {
   IPluginLedgerConnectorIrohaOptions,
   PluginLedgerConnectorIroha,
 } from "./plugin-ledger-connector-iroha";
+
+export { signIrohaTransaction } from "./iroha-sign-utils";
+
 export { PluginFactoryLedgerConnector } from "./plugin-factory-ledger-connector";
 
 import { IPluginFactoryOptions } from "@hyperledger/cactus-core-api";
 import { PluginFactoryLedgerConnector } from "./plugin-factory-ledger-connector";
+
+export {
+  IrohaApiClient,
+  IrohaApiClientOptions,
+} from "./api-client/iroha-api-client";
 
 export * from "./generated/openapi/typescript-axios/api";
 

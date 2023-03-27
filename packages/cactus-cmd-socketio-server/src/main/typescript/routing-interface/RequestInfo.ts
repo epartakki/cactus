@@ -6,14 +6,20 @@
  */
 
 // transaction information
-class TradeInfo {
+
+export class ProofJsonObj {
+  tradeInfo = "";
+  proof_request = "";
+  proof = "";
+}
+export class TradeInfo {
   ethereumAccountFrom: string = "";
   ethereumAccountTo: string = "";
   fabricAccountFrom: string = "";
   fabricAccountTo: string = "";
   tradingValue: string = "";
-  carID: string = "";
-  proofJson: object = {};
+  assetID: string = "";
+  proofJson: ProofJsonObj = new ProofJsonObj();
 }
 
 // authorization information

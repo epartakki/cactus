@@ -56,6 +56,8 @@ export interface IFabricTestLedgerV1ConstructorOptions {
   stateDatabase?: STATE_DATABASE;
   orgList?: string[];
   extraOrgs?: organizationDefinitionFabricV2[];
+  // For test development, attach to ledger that is already running, don't spin up new one
+  useRunningLedger?: boolean;
 }
 
 export enum STATE_DATABASE {
@@ -115,6 +117,7 @@ export class FabricTestLedgerV1 implements ITestLedger {
 
   private container: Container | undefined;
   private containerId: string | undefined;
+  private readonly useRunningLedger: boolean;
 
   public get className(): string {
     return FabricTestLedgerV1.CLASS_NAME;
@@ -143,6 +146,10 @@ export class FabricTestLedgerV1 implements ITestLedger {
       this.log.warn(
         `This version of Fabric ${this.getFabricVersion()} is unsupported`,
       );
+
+    this.useRunningLedger = Bools.isBooleanStrict(options.useRunningLedger)
+      ? (options.useRunningLedger as boolean)
+      : false;
 
     this.testLedgerId = `cactusf2aio.${this.imageVersion}.${Date.now()}`;
 
@@ -248,6 +255,13 @@ export class FabricTestLedgerV1 implements ITestLedger {
     }
   }
 
+  /**
+   * Tuple of [adminUsername, adminSecret]
+   */
+  public get adminCredentials(): [string, string] {
+    return ["admin", "adminpw"];
+  }
+
   public async enrollAdmin(): Promise<[X509Identity, Wallet]> {
     const fnTag = `${this.className}#enrollAdmin()`;
     try {
@@ -255,7 +269,10 @@ export class FabricTestLedgerV1 implements ITestLedger {
       const wallet = await Wallets.newInMemoryWallet();
 
       // Enroll the admin user, and import the new identity into the wallet.
-      const request = { enrollmentID: "admin", enrollmentSecret: "adminpw" };
+      const request = {
+        enrollmentID: this.adminCredentials[0],
+        enrollmentSecret: this.adminCredentials[1],
+      };
       const enrollment = await ca.enroll(request);
 
       const mspId = this.getDefaultMspId();
@@ -983,7 +1000,7 @@ export class FabricTestLedgerV1 implements ITestLedger {
     const fnTag = `FabricTestLedger#addOrgX()`;
     const { log } = this;
     log.debug(`
-    Adding ${orgName} on ${channel}, with state database ${database}. 
+    Adding ${orgName} on ${channel}, with state database ${database}.
     Certification authority: ${certificateAuthority}.
     Default port: ${peerPort}
     Path to original source files: ${addOrgXDirectoryPath}`);
@@ -1205,6 +1222,25 @@ export class FabricTestLedgerV1 implements ITestLedger {
 
   public async start(ops?: LedgerStartOptions): Promise<Container> {
     const containerNameAndTag = this.getContainerImageName();
+
+    if (this.useRunningLedger) {
+      this.log.info(
+        "Search for already running Fabric Test Ledger because 'useRunningLedger' flag is enabled.",
+      );
+      this.log.info(
+        "Search criteria - image name: ",
+        containerNameAndTag,
+        ", state: running",
+      );
+      const containerInfo = await Containers.getByPredicate(
+        (ci) => ci.Image === containerNameAndTag && ci.State === "running",
+      );
+      const docker = new Docker();
+      this.containerId = containerInfo.Id;
+      this.container = docker.getContainer(this.containerId);
+      return this.container;
+    }
+
     const dockerEnvVars = envMapToDocker(this.envVars);
 
     if (this.container) {
@@ -1367,11 +1403,28 @@ export class FabricTestLedgerV1 implements ITestLedger {
   }
 
   public stop(): Promise<unknown> {
-    return Containers.stop(this.container as Container);
+    if (this.useRunningLedger) {
+      this.log.info("Ignore stop request because useRunningLedger is enabled.");
+      return Promise.resolve();
+    } else if (this.container) {
+      return Containers.stop(this.container);
+    } else {
+      return Promise.reject(
+        new Error(`Container was never created, nothing to stop.`),
+      );
+    }
   }
 
   public async destroy(): Promise<void> {
     const fnTag = "FabricTestLedgerV1#destroy()";
+
+    if (this.useRunningLedger) {
+      this.log.info(
+        "Ignore destroy request because useRunningLedger is enabled.",
+      );
+      return Promise.resolve();
+    }
+
     try {
       if (!this.container) {
         throw new Error(`${fnTag} Container not found, nothing to destroy.`);

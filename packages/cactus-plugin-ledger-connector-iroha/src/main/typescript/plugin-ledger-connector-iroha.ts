@@ -1,15 +1,10 @@
-import { Server } from "http";
-import * as grpc from "grpc";
-import { Server as SecureServer } from "https";
-import { CommandService_v1Client as CommandService } from "iroha-helpers-ts/lib/proto/endpoint_grpc_pb";
-import { QueryService_v1Client as QueryService } from "iroha-helpers-ts/lib/proto/endpoint_grpc_pb";
-import commands from "iroha-helpers-ts/lib/commands/index";
-import queries from "iroha-helpers-ts/lib/queries";
+import { Transaction } from "iroha-helpers/lib/proto/transaction_pb";
+import { TxBuilder } from "iroha-helpers/lib/chain";
+import type { Server as SocketIoServer } from "socket.io";
+import type { Socket as SocketIoSocket } from "socket.io";
 import type { Express } from "express";
-import {
-  GrantablePermission,
-  GrantablePermissionMap,
-} from "iroha-helpers-ts/lib/proto/primitive_pb";
+
+import { IrohaTransactionWrapper } from "./iroha-transaction-wrapper";
 
 import OAS from "../json/openapi.json";
 
@@ -32,18 +27,24 @@ import {
   Logger,
   LoggerProvider,
   LogLevelDesc,
-  Http405NotAllowedError,
 } from "@hyperledger/cactus-common";
+
 import { RuntimeError } from "run-time-error";
+
 import {
   IrohaCommand,
-  IrohaQuery,
   RunTransactionRequestV1,
+  RunTransactionSignedRequestV1,
+  GenerateTransactionRequestV1,
   RunTransactionResponse,
+  WatchBlocksV1,
+  IrohaSocketIOTransactV1,
 } from "./generated/openapi/typescript-axios";
 
 import { RunTransactionEndpoint } from "./web-services/run-transaction-endpoint";
+import { GenerateTransactionEndpoint } from "./web-services/generate-transaction-endpoint";
 import { PrometheusExporter } from "./prometheus-exporter/prometheus-exporter";
+import { IrohaSocketIOEndpoint } from "./web-services/iroha-socketio-endpoint";
 import {
   GetPrometheusExporterMetricsEndpointV1,
   IGetPrometheusExporterMetricsEndpointV1Options,
@@ -53,10 +54,12 @@ export const E_KEYCHAIN_NOT_FOUND = "cactus.connector.iroha.keychain_not_found";
 
 export interface IPluginLedgerConnectorIrohaOptions
   extends ICactusPluginOptions {
-  rpcToriiPortHost: string;
+  rpcToriiPortHost: string; //http host:port
+  rpcApiWsHost?: string;
   pluginRegistry: PluginRegistry;
   prometheusExporter?: PrometheusExporter;
   logLevel?: LogLevelDesc;
+  instanceId: string;
 }
 
 export class PluginLedgerConnectorIroha
@@ -64,7 +67,7 @@ export class PluginLedgerConnectorIroha
     IPluginLedgerConnector<
       never,
       never,
-      RunTransactionRequestV1,
+      RunTransactionSignedRequestV1 | RunTransactionRequestV1,
       RunTransactionResponse
     >,
     ICactusPlugin,
@@ -72,10 +75,8 @@ export class PluginLedgerConnectorIroha
   private readonly instanceId: string;
   public prometheusExporter: PrometheusExporter;
   private readonly log: Logger;
-  private readonly pluginRegistry: PluginRegistry;
 
   private endpoints: IWebServiceEndpoint[] | undefined;
-  private httpServer: Server | SecureServer | null = null;
 
   public static readonly CLASS_NAME = "PluginLedgerConnectorIroha";
 
@@ -90,7 +91,6 @@ export class PluginLedgerConnectorIroha
       options.rpcToriiPortHost,
       `${fnTag} options.rpcToriiPortHost`,
     );
-    Checks.truthy(options.pluginRegistry, `${fnTag} options.pluginRegistry`);
     Checks.truthy(options.instanceId, `${fnTag} options.instanceId`);
 
     const level = this.options.logLevel || "INFO";
@@ -98,7 +98,6 @@ export class PluginLedgerConnectorIroha
     this.log = LoggerProvider.getOrCreate({ level, label });
 
     this.instanceId = options.instanceId;
-    this.pluginRegistry = options.pluginRegistry;
     this.prometheusExporter =
       options.prometheusExporter ||
       new PrometheusExporter({ pollingIntervalInMin: 1 });
@@ -106,7 +105,6 @@ export class PluginLedgerConnectorIroha
       this.prometheusExporter,
       `${fnTag} options.prometheusExporter`,
     );
-
     this.prometheusExporter.startMetricsCollection();
   }
 
@@ -140,9 +138,63 @@ export class PluginLedgerConnectorIroha
     this.log.info(`Shutting down ${this.className}...`);
   }
 
-  async registerWebServices(app: Express): Promise<IWebServiceEndpoint[]> {
+  async registerWebServices(
+    app: Express,
+    wsApi?: SocketIoServer,
+  ): Promise<IWebServiceEndpoint[]> {
+    const { logLevel } = this.options;
     const webServices = await this.getOrCreateWebServices();
     await Promise.all(webServices.map((ws) => ws.registerExpress(app)));
+
+    if (wsApi) {
+      wsApi.on("connection", (socket: SocketIoSocket) => {
+        this.log.debug(`New Socket connected. ID=${socket.id}`);
+        const irohaSocketEndpoint = new IrohaSocketIOEndpoint({
+          socket,
+          logLevel,
+        });
+        let monitorFlag: boolean;
+
+        socket.on(WatchBlocksV1.Subscribe, (monitorOptions: any) => {
+          this.log.debug(`Caught event: Subscribe`);
+          monitorFlag = true;
+          irohaSocketEndpoint.startMonitor(monitorOptions);
+        });
+
+        socket.on(WatchBlocksV1.Unsubscribe, () => {
+          this.log.debug(`Caught event: Unsubscribe`);
+          irohaSocketEndpoint.stopMonitor();
+        });
+
+        socket.on(
+          IrohaSocketIOTransactV1.SendAsyncRequest,
+          (asyncRequestData: any) => {
+            this.log.debug(`Caught event: SendAsyncRequest`);
+            socket.disconnect(true);
+            irohaSocketEndpoint.sendRequest(asyncRequestData, true);
+          },
+        );
+
+        socket.on(
+          IrohaSocketIOTransactV1.SendSyncRequest,
+          (syncRequestData: any) => {
+            this.log.debug(`Caught event: SendSyncRequest`);
+            irohaSocketEndpoint.sendRequest(syncRequestData, false);
+          },
+        );
+
+        socket.on("disconnect", async (reason: string) => {
+          this.log.info(
+            `Session: ${socket.id} disconnected. Reason: ${reason}`,
+          );
+          if (monitorFlag) {
+            irohaSocketEndpoint.stopMonitor();
+            monitorFlag = false;
+          }
+        });
+      });
+    }
+
     return webServices;
   }
 
@@ -166,6 +218,14 @@ export class PluginLedgerConnectorIroha
       const endpoint = new GetPrometheusExporterMetricsEndpointV1(opts);
       endpoints.push(endpoint);
     }
+    {
+      const endpoint = new GenerateTransactionEndpoint({
+        connector: this,
+        logLevel: this.options.logLevel,
+      });
+      endpoints.push(endpoint);
+    }
+
     this.endpoints = endpoints;
     return endpoints;
   }
@@ -185,448 +245,127 @@ export class PluginLedgerConnectorIroha
     return consensusHasTransactionFinality(currentConsensusAlgorithmFamily);
   }
 
-  public async transact(
+  /**
+   * Create and run Iroha transaction based on input arguments.
+   * Transaction is signed with a private key supplied in the input argument.
+   *
+   * @param req `RunTransactionSignedRequestV1`
+   * @param commandService Iroha SDK `CommandService_v1Client` instance
+   * @param queryService Iroha SDK `QueryService_v1Client` instance
+   * @returns `Promise<RunTransactionResponse>`
+   */
+  private async transactRequest(
     req: RunTransactionRequestV1,
   ): Promise<RunTransactionResponse> {
-    const { baseConfig } = req;
-    if (
-      !baseConfig ||
-      !baseConfig.privKey ||
-      !baseConfig.creatorAccountId ||
-      !baseConfig.irohaHost ||
-      !baseConfig.irohaPort ||
-      !baseConfig.quorum ||
-      !baseConfig.timeoutLimit
-    ) {
-      this.log.debug(
-        "Certain field within the Iroha basic configuration is missing!",
-      );
-      throw new RuntimeError("Some fields in baseConfig is undefined");
-    }
-    const irohaHostPort = `${baseConfig.irohaHost}:${baseConfig.irohaPort}`;
+    const transaction = new IrohaTransactionWrapper({
+      logLevel: this.options.logLevel,
+    });
+    return await transaction.transact(req);
+  }
 
-    let grpcCredentials;
-    if (baseConfig.tls) {
-      throw new RuntimeError("TLS option is not supported");
-    } else {
-      grpcCredentials = grpc.credentials.createInsecure();
+  /**
+   * Run Iroha transaction based on already signed transaction received from the client.
+   *
+   * @param req RunTransactionSignedRequestV1
+   * @returns `Promise<RunTransactionResponse>`
+   */
+  private async transactSigned(
+    req: RunTransactionSignedRequestV1,
+  ): Promise<RunTransactionResponse> {
+    if (!req.baseConfig || !req.baseConfig.timeoutLimit) {
+      throw new RuntimeError("baseConfig.timeoutLimit is undefined");
     }
-    const commandService = new CommandService(
-      irohaHostPort,
-      //TODO:do something in the production environment
-      grpcCredentials,
+
+    const { commandService } = IrohaTransactionWrapper.getIrohaServices(
+      req.baseConfig,
     );
-    const queryService = new QueryService(irohaHostPort, grpcCredentials);
-    const commandOptions = {
-      privateKeys: baseConfig.privKey, //need an array of keys for command
-      creatorAccountId: baseConfig.creatorAccountId,
-      quorum: baseConfig.quorum,
-      commandService: commandService,
-      timeoutLimit: baseConfig.timeoutLimit,
-    };
-    const queryOptions = {
-      privateKey: baseConfig.privKey[0], //only need 1 key for query
-      creatorAccountId: baseConfig.creatorAccountId as string,
-      queryService: queryService,
-      timeoutLimit: baseConfig.timeoutLimit,
-    };
 
-    switch (req.commandName) {
-      case IrohaCommand.CreateAccount: {
-        try {
-          const response = await commands.createAccount(commandOptions, {
-            accountName: req.params[0],
-            domainId: req.params[1],
-            publicKey: req.params[2],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.SetAccountDetail: {
-        try {
-          const response = await commands.setAccountDetail(commandOptions, {
-            accountId: req.params[0],
-            key: req.params[1],
-            value: req.params[2],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.CompareAndSetAccountDetail: {
-        try {
-          const response = await commands.compareAndSetAccountDetail(
-            commandOptions,
-            {
-              accountId: req.params[0],
-              key: req.params[1],
-              value: req.params[2],
-              oldValue: req.params[3],
-            },
-          );
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.CreateAsset: {
-        try {
-          const response = await commands // (coolcoin#test; precision:3)
-            .createAsset(commandOptions, {
-              assetName: req.params[0],
-              domainId: req.params[1],
-              precision: req.params[2],
-            });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.CreateDomain: {
-        try {
-          const response = await commands.createDomain(commandOptions, {
-            domainId: req.params[0],
-            defaultRole: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.SetAccountQuorum: {
-        try {
-          const response = await commands.setAccountQuorum(commandOptions, {
-            accountId: req.params[0],
-            quorum: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.AddAssetQuantity: {
-        try {
-          const response = await commands.addAssetQuantity(commandOptions, {
-            assetId: req.params[0],
-            amount: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.SubtractAssetQuantity: {
-        try {
-          const response = await commands.subtractAssetQuantity(
-            commandOptions,
-            {
-              assetId: req.params[0],
-              amount: req.params[1],
-            },
-          );
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.TransferAsset: {
-        try {
-          const response = await commands.transferAsset(commandOptions, {
-            srcAccountId: req.params[0],
-            destAccountId: req.params[1],
-            assetId: req.params[2],
-            description: req.params[3],
-            amount: req.params[4],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetSignatories: {
-        try {
-          const queryRes = await queries.getSignatories(queryOptions, {
-            accountId: req.params[0],
-          });
-          return { transactionReceipt: queryRes };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetAccount: {
-        try {
-          const queryRes = await queries.getAccount(queryOptions, {
-            accountId: req.params[0],
-          });
-          return { transactionReceipt: queryRes };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetAccountDetail: {
-        try {
-          const queryRes = await queries.getAccountDetail(queryOptions, {
-            accountId: req.params[0],
-            key: req.params[1],
-            writer: req.params[2],
-            pageSize: req.params[3],
-            paginationKey: req.params[4],
-            paginationWriter: req.params[5],
-          });
-          return { transactionReceipt: queryRes };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetAssetInfo: {
-        try {
-          const queryRes = await queries.getAssetInfo(queryOptions, {
-            assetId: req.params[0],
-          });
-          return { transactionReceipt: queryRes };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetAccountAssets: {
-        try {
-          const queryRes = await queries.getAccountAssets(queryOptions, {
-            accountId: req.params[0],
-            pageSize: req.params[1],
-            firstAssetId: req.params[2],
-          });
-          return { transactionReceipt: queryRes };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.AddSignatory: {
-        try {
-          const response = await commands.addSignatory(commandOptions, {
-            accountId: req.params[0],
-            publicKey: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.RemoveSignatory: {
-        try {
-          const response = await commands.removeSignatory(commandOptions, {
-            accountId: req.params[0],
-            publicKey: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetRoles: {
-        try {
-          const response = await queries.getRoles(queryOptions);
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.CreateRole: {
-        try {
-          const response = await commands.createRole(commandOptions, {
-            roleName: req.params[0],
-            permissionsList: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.AppendRole: {
-        try {
-          const response = await commands.appendRole(commandOptions, {
-            accountId: req.params[0],
-            roleName: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.DetachRole: {
-        try {
-          const response = await commands.detachRole(commandOptions, {
-            accountId: req.params[0],
-            roleName: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetRolePermissions: {
-        try {
-          const response = await queries.getRolePermissions(queryOptions, {
-            roleId: req.params[0],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.GrantPermission: {
-        try {
-          type permission = keyof GrantablePermissionMap;
-          const response = await commands.grantPermission(commandOptions, {
-            accountId: req.params[0],
-            permission: GrantablePermission[req.params[1] as permission],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.RevokePermission: {
-        try {
-          type permission = keyof GrantablePermissionMap;
-          const response = await commands.revokePermission(commandOptions, {
-            accountId: req.params[0],
-            permission: GrantablePermission[req.params[1] as permission],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.SetSettingValue: {
-        throw new Http405NotAllowedError("SetSettingValue is not supported.");
-      }
-      case IrohaQuery.GetTransactions: {
-        try {
-          const response = await queries.getTransactions(queryOptions, {
-            txHashesList: req.params[0],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetPendingTransactions: {
-        try {
-          const response = await queries.getPendingTransactions(queryOptions, {
-            pageSize: req.params[0],
-            firstTxHash: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetAccountTransactions: {
-        try {
-          const response = await queries.getAccountTransactions(queryOptions, {
-            accountId: req.params[0],
-            pageSize: req.params[1],
-            firstTxHash: req.params[2],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetAccountAssetTransactions: {
-        try {
-          const response = await queries.getAccountAssetTransactions(
-            queryOptions,
-            {
-              accountId: req.params[0],
-              assetId: req.params[1],
-              pageSize: req.params[2],
-              firstTxHash: req.params[3],
-            },
-          );
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetBlock: {
-        try {
-          const response = await queries.getBlock(queryOptions, {
-            height: req.params[0],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.CallEngine: {
-        try {
-          const response = await commands.callEngine(commandOptions, {
-            type: req.params[0],
-            caller: req.params[1],
-            callee: req.params[2],
-            input: req.params[3],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetEngineReceipts: {
-        try {
-          const response = await queries.getEngineReceipts(queryOptions, {
-            txHash: req.params[0],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.FetchCommits: {
-        try {
-          const response = await queries.fetchCommits(queryOptions);
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.AddPeer: {
-        try {
-          const response = await commands.addPeer(commandOptions, {
-            address: req.params[0],
-            peerKey: req.params[1],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaCommand.RemovePeer: {
-        try {
-          const response = await commands.removePeer(commandOptions, {
-            publicKey: req.params[0],
-          });
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      case IrohaQuery.GetPeers: {
-        try {
-          const response = await queries.getPeers(queryOptions);
-          return { transactionReceipt: response };
-        } catch (err) {
-          throw new RuntimeError(err);
-        }
-      }
-      default: {
-        throw new RuntimeError(
-          "command or query does not exist, or is not supported in current version",
-        );
-      }
+    try {
+      const transactionBinary = Uint8Array.from(
+        Object.values(req.signedTransaction),
+      );
+      const signedTransaction = Transaction.deserializeBinary(
+        transactionBinary,
+      );
+      this.log.debug("Received signed transaction:", signedTransaction);
+
+      const sendResponse = await new TxBuilder(signedTransaction).send(
+        commandService,
+        req.baseConfig.timeoutLimit,
+      );
+
+      return { transactionReceipt: sendResponse };
+    } catch (error) {
+      throw new RuntimeError(error as any);
+    }
+  }
+
+  /**
+   * Entry point for transact endpoint.
+   * Validate common `baseConfig` arguments and perapre command and query services.
+   * Call different transaction logic depending on input arguments.
+   *
+   * @note TLS connections are not supported yet.
+   * @param req `RunTransactionSignedRequestV1 | RunTransactionRequestV1`
+   * @returns `Promise<RunTransactionResponse>`
+   */
+  public async transact(
+    req: RunTransactionSignedRequestV1 | RunTransactionRequestV1,
+  ): Promise<RunTransactionResponse> {
+    if ("signedTransaction" in req) {
+      return this.transactSigned(req);
+    } else {
+      const transaction = new IrohaTransactionWrapper({
+        logLevel: this.options.logLevel,
+      });
+      return await transaction.transact(req);
+    }
+  }
+
+  /**
+   * Check if given Iroha command is supported and can be safely called on the `TxBuilder`.
+   * Command must be listend in OpenAPI interface and be present on the builder object.
+   * @param builder `TxBuilder` that will be used to call the command on.
+   * @param command Iroha command name in string format.
+   * @returns `true` if command is safe, `false` otherwise.
+   */
+  private isSafeIrohaCommand(builder: TxBuilder, command: string): boolean {
+    // Check if command is listen in the OpenAPI interface
+    if (!Object.values(IrohaCommand).includes(command as IrohaCommand)) {
+      this.log.debug("Command not listed in OpenAPI interface");
+      return false;
+    }
+
+    // Check if function is present in builder object
+    return (
+      command in builder && typeof (builder as any)[command] === "function"
+    );
+  }
+
+  /**
+   * Entry point for generate unsigned transaction endpoint.
+   * Transaction must be deserialized and signed on the client side.
+   * It can be then send to transact endpoint for futher processing.
+   * @param req `GenerateTransactionRequestV1`
+   * @returns `Uint8Array` of serialized transaction.
+   */
+  public generateTransaction(req: GenerateTransactionRequestV1): Uint8Array {
+    req.quorum = req.quorum ?? 1;
+    const builder = new TxBuilder();
+
+    if (!this.isSafeIrohaCommand(builder, req.commandName)) {
+      throw new RuntimeError(
+        `Bad Request: Not supported Iroha command '${req.commandName}' - aborted.`,
+      );
+    }
+
+    try {
+      return (builder as any)
+        [req.commandName](req.commandParams)
+        .addMeta(req.creatorAccountId, req.quorum)
+        .tx.serializeBinary();
+    } catch (error) {
+      throw new RuntimeError(error as any);
     }
   }
 }
